@@ -24,6 +24,7 @@ author: Mark Frimston - mfrimston@gmail.com
 import time
 import mysql.connector
 import json
+import bcrypt
 
 # import the MUD server class
 from mudserver import MudServer
@@ -70,21 +71,22 @@ def loadplayer(player):
         database=json_object['database']
     )
     mycursor = mydb.cursor()
-    mycursor.execute("SELECT id, name, password, lastroom FROM players WHERE name = %s AND password = %s",
-                     (player['name'], player['password']))
+    mycursor.execute("SELECT id, name, password, lastroom FROM players WHERE name = %s",
+                     (player['name'], ))
     row = mycursor.fetchone()
     if row is None:
         return False
     else:
-        player['dbid'] = row[0]
-        player['room'] = row[3]
-        mycursor.execute("SELECT itemid FROM inventory WHERE playerid = %s", (row[0],))
-        res = mycursor.fetchall()
-        for irow in res:
-            player['inventory'].append(loaditem(irow[0]))
+        if bcrypt.checkpw(player['password'].encode('utf-8'), row[2].encode('utf-8')):
+            player['dbid'] = row[0]
+            player['room'] = row[3]
+            mycursor.execute("SELECT itemid FROM inventory WHERE playerid = %s", (row[0],))
+            res = mycursor.fetchall()
+            for irow in res:
+                player['inventory'].append(loaditem(irow[0]))
 
-        return True
-
+            return True
+        return False
 
 def checkname(name):
     with open('db.json', 'r') as openfile:
@@ -132,7 +134,7 @@ def instplayer(player):
     )
     mycursor = mydb.cursor()
     mycursor.execute("INSERT INTO players (name, password, lastroom) VALUES(%s, %s, 1)",
-                     (player['name'], player['password']))
+                     (player['name'], bcrypt.hashpw(player['password'].encode('utf-8'), bcrypt.gensalt())))
     mydb.commit()
     player['dbid'] = mycursor.lastrowid
 
@@ -254,7 +256,7 @@ while True:
         }
 
         # send the new player a prompt for their name
-        mud.send_message(id, "What is your name?")
+        mud.send_message(id, "What is your name? (or 'new' for a new player)")
 
     # go through any recently disconnected players
     for id in mud.get_disconnected_players():
@@ -478,7 +480,7 @@ while True:
             for it in rm['items']:
                 itemshere.append(it['name'])
 
-            mud.send_message(id, "Items are: {}".format(", ".join(itemshere)))
+            mud.send_message(id, "Objects are: {}".format(", ".join(itemshere)))
 
         # 'go' command
         elif command == "go":
