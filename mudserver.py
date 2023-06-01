@@ -7,7 +7,6 @@ server running then used to send and receive messages from players.
 author: Mark Frimston - mfrimston@gmail.com
 """
 
-
 import socket
 import select
 import time
@@ -183,11 +182,11 @@ class MudServer(object):
         """
         # we make sure to put a newline on the end so the client receives the
         # message on its own line
-        self._attempt_send(to, message+"\n\r")
+        self._attempt_send(to, message + "\n\r")
 
     def disconnect(self, me):
         self._clients[me].socket.close()
-        del(self._clients[me])
+        del (self._clients[me])
 
     def shutdown(self):
         """Closes down the server, disconnecting all clients and
@@ -300,7 +299,6 @@ class MudServer(object):
 
                 # if there was a message in the data
                 if message:
-
                     # remove any spaces, tabs etc from the start and end of
                     # the message
                     message = message.strip()
@@ -322,7 +320,7 @@ class MudServer(object):
     def _handle_disconnect(self, clid):
 
         # remove the client from the clients map
-        del(self._clients[clid])
+        del (self._clients[clid])
 
         # add a 'player left' occurence to the new events list, with the
         # player's id number
