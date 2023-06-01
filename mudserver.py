@@ -185,6 +185,10 @@ class MudServer(object):
         # message on its own line
         self._attempt_send(to, message+"\n\r")
 
+    def disconnect(self, me):
+        self._clients[me].socket.close()
+        del(self._clients[me])
+
     def shutdown(self):
         """Closes down the server, disconnecting all clients and
         closing the listen socket.
