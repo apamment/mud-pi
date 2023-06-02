@@ -215,7 +215,7 @@ class MudServer(object):
         # return the info list
         return retval
 
-    def send_message(self, to, message, color=None, auth=True):
+    def send_message(self, to, message, color=None, auth=True, lineend="\r\n"):
         """Sends the text in the 'message' parameter to the player with
         the id number given in the 'to' parameter. The text will be
         printed out in the player's terminal.
@@ -223,20 +223,21 @@ class MudServer(object):
         # we make sure to put a newline on the end so the client receives the
         # message on its own line
 
+
         if auth and not self._clients[to].authenticated:
             return
 
         if color is None:
             msg = multiple_replace(message, get_color_list(), self._clients[to].color_enabled)
             if self._clients[to].color_enabled:
-                self._attempt_send(to, msg + get_color('reset') + "\n\r")
+                self._attempt_send(to, msg + get_color('reset') + lineend)
             else:
-                self._attempt_send(to, msg + "\n\r")
+                self._attempt_send(to, msg + lineend)
         else:
             if self._clients[to].color_enabled:
-                self._attempt_send(to, get_color(color) + message + get_color('reset') + "\n\r")
+                self._attempt_send(to, get_color(color) + message + get_color('reset') + lineend)
             else:
-                self._attempt_send(to, message + "\n\r")
+                self._attempt_send(to, message + lineend)
 
     def disconnect(self, me):
         self._clients[me].socket.close()
