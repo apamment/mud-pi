@@ -131,11 +131,7 @@ def loadplayer(player):
 def checkname(name):
     if name.lower() == "new":
         return False
-    elif ',' in name:
-        return False
-    elif '"' in name:
-        return False
-    elif '\'' in name:
+    elif not name.isalnum():
         return False
     elif len(name) < 2:
         return False
@@ -201,10 +197,12 @@ def loaditem(itemid):
         database=json_object['database']
     )
     mycursor = mydb.cursor()
-    mycursor.execute("SELECT id, name, description, invulnerable, isuniq FROM itemdef WHERE id = %s", (itemid,))
+    mycursor.execute("SELECT id, name, description, invulnerable, isuniq, isarmor, isweapon, power FROM itemdef WHERE "
+                     "id = %s", (itemid,))
     row = mycursor.fetchone()
 
-    item = {'id': row[0], 'name': row[1], 'description': row[2], 'invulnerable': row[3], 'isuniq': row[4]}
+    item = {'id': row[0], 'name': row[1], 'description': row[2], 'invulnerable': row[3], 'isuniq': row[4],
+            'isarmor': row[5], 'isweapon': row[6], 'power': row[7]}
 
     return item
 
@@ -346,6 +344,8 @@ while True:
             "health": 100,
             "gold": 0,
             "color": True,
+            "armor": None,
+            "weapon": None,
             "inventory": []
         }
 
@@ -432,6 +432,13 @@ while True:
                     players[id]["health"] = int(getattrib(players[id]["dbid"], "health", "100"))
                     players[id]["gold"] = int(getattrib(players[id]["dbid"], "gold", "0"))
                     players[id]["color"] = str2bool(getattrib(players[id]["dbid"], "color", "True"))
+                    a = int(getattrib(players[id]["dbid"], "armor", "0"))
+                    if a != 0:
+                        players[id]["armor"] = loaditem(a)
+                    w = int(getattrib(players[id]["dbid"], "weapon", "0"))
+                    if w != 0:
+                        players[id]["weapon"] = loaditem(w)
+
                     if not players[id]["color"]:
                         mud.togglecolor(id)
                     mud.authenticate(id)
@@ -472,21 +479,26 @@ while True:
 
                 # send the player back the list of possible commands
                 mud.send_message(id, "Commands:")
-                mud.send_message(id, "  say <message>  - Says something out loud, "
+                mud.send_message(id, "  say <message>          - Says something out loud, "
                                  + "e.g. 'say Hello'")
-                mud.send_message(id, "  look           - Examines the "
+                mud.send_message(id, "  look                   - Examines the "
                                  + "surroundings, e.g. 'look'")
-                mud.send_message(id, "  examine <item> - Examines an "
+                mud.send_message(id, "  examine <item>         - Examines an "
                                  + "item, e.g. 'examine fireplace'")
-                mud.send_message(id, "  inventory      - Lists your inventory")
-                mud.send_message(id, "  take <item>    - Take an "
+                mud.send_message(id, "  inventory              - Lists your inventory")
+                mud.send_message(id, "  equip <item>           - Equip an "
+                                 + "item, e.g. 'equip sword'")
+                mud.send_message(id, "  unequip <weapon/armor> - Remove your currently "
+                                 + "equipped weapon or armor")
+                mud.send_message(id, "                           e.g. 'unequip weapon'")
+                mud.send_message(id, "  take <item>            - Take an "
                                  + "item, e.g. 'take fireplace'")
-                mud.send_message(id, "  drop <item>    - Destroy an inventory "
+                mud.send_message(id, "  drop <item>            - Destroy an inventory "
                                  + "item")
-                mud.send_message(id, "  go <exit>      - Moves through the exit "
+                mud.send_message(id, "  go <exit>              - Moves through the exit "
                                  + "specified, e.g. 'go outside'")
-                mud.send_message(id, "  color <on/off> - Turns color on or off, e.g. 'color off'")
-                mud.send_message(id, "  quit           - Disconnects from the game")
+                mud.send_message(id, "  color <on/off>         - Turns color on or off, e.g. 'color off'")
+                mud.send_message(id, "  quit                   - Disconnects from the game")
 
             # 'say' command
             elif command == "say":
@@ -554,10 +566,69 @@ while True:
                     mud.send_message(id, "take what?!")
 
             elif command == "inventory":
-                mud.send_message(id, "Your Inventory:")
+                if players[id]['weapon'] is not None:
+                    mud.send_message(id, "%greenYour Weapon: %reset{}".format(players[id]['weapon']['name']))
+                else:
+                    mud.send_message(id, "%greenYour Weapon: %resetNone")
+                if players[id]['armor'] is not None:
+                    mud.send_message(id, "%greenYour Armor: %reset{}".format(players[id]['armor']['name']))
+                else:
+                    mud.send_message(id, "%greenYour Armor: %resetNone")
+                mud.send_message(id, "%greenYour Inventory:")
                 for item in players[id]['inventory']:
                     mud.send_message(id, " - {}".format(item['name']))
 
+            elif command == "unequip":
+                ex = params.lower()
+                if ex == "armor":
+                    if players[id]['armor'] is not None:
+                        mud.send_message(id, "You remove your {}".format(players[id]['armor']['name']))
+                        players[id]['inventory'].append(players[id]['armor'])
+                        addinventory(players[id]['dbid'], players[id]['armor']['id'])
+                        putattrib(players[id]['dbid'], "armor", "0")
+                    else:
+                        mud.send_message(id, "%redYou're not wearing any armor!")
+                elif ex == "weapon":
+                    if players[id]['weapon'] is not None:
+                        mud.send_message(id, "You remove your {}".format(players[id]['weapon']['name']))
+                        players[id]['inventory'].append(players[id]['weapon'])
+                        addinventory(players[id]['dbid'], players[id]['weapon']['id'])
+                        putattrib(players[id]['dbid'], "weapon", "0")
+                    else:
+                        mud.send_message(id, "%redYou're not wielding a weapon!")
+                else:
+                    mud.send_message(id, "Parameter must be either 'weapon' or 'armor'")
+            elif command == "equip":
+                ex = params.lower()
+                found = False
+                for it in players[id]['inventory']:
+                    if it['name'] == ex:
+                        found = True
+                        if it['isarmor']:
+                            if players[id]['armor'] is not None:
+                                players[id]['inventory'].append(players[id]['armor'])
+                                addinventory(players[id]['dbid'], players[id]['armor']['id'])
+                            players[id]['armor'] = it
+                            putattrib(players[id]['dbid'], "armor", it['id'])
+                            delinventory(players[id]['dbid'], it['id'])
+                            mud.send_message(id, "You equip your {}".format(it['name']))
+                            players[id]['inventory'].remove(it)
+                        elif it['isweapon']:
+                            if players[id]['weapon'] is not None:
+                                players[id]['inventory'].append(players[id]['weapon'])
+                                addinventory(players[id]['dbid'], players[id]['weapon']['id'])
+                            players[id]['weapon'] = it
+                            putattrib(players[id]['dbid'], "weapon", it['id'])
+                            delinventory(players[id]['dbid'], it['id'])
+                            mud.send_message(id, "You equip your {}".format(it['name']))
+                            players[id]['inventory'].remove(it)
+
+                        else:
+                            mud.send_message(id, "That item is not able to be equipped")
+                        break
+
+                if not found:
+                    mud.send_message(id, "equip what?!")
             elif command == "examine":
                 rm = findroom(players[id]["room"])
                 found = False

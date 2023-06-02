@@ -6,7 +6,3 @@
 
   An Experimental MUD Engine for an Experimental MUD!
 
-  TODO: * Equipment    * Merchants
-        * NPCs         * Battle
-
-
