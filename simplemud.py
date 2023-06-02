@@ -30,6 +30,45 @@ import bcrypt
 from mudserver import MudServer
 
 
+def putattrib(pid, attrib, value):
+    with open('db.json', 'r') as openfile:
+        json_object = json.load(openfile)
+
+    mydb = mysql.connector.connect(
+        host=json_object['host'],
+        user=json_object['username'],
+        password=json_object['password'],
+        database=json_object['database']
+    )
+    mycursor = mydb.cursor()
+    mycursor.execute("SELECT id FROM playerattr WHERE pid = %s AND attrib = %s", (pid, attrib))
+    row = mycursor.fetchone()
+    if row is None:
+        mycursor.execute("INSERT INTO playerattr (pid, attrib, value) VALUES(%s, %s, %s)", (pid, attrib, value))
+    else:
+        mycursor.execute("UPDATE playerattr SET value = %s WHERE id = %s", (value, row[0]))
+    mydb.commit()
+
+
+def getattrib(pid, attrib, defvalue):
+    with open('db.json', 'r') as openfile:
+        json_object = json.load(openfile)
+
+    mydb = mysql.connector.connect(
+        host=json_object['host'],
+        user=json_object['username'],
+        password=json_object['password'],
+        database=json_object['database']
+    )
+    mycursor = mydb.cursor()
+    mycursor.execute("SELECT value FROM playerattr WHERE pid = %s AND attrib = %s", (pid, attrib))
+    row = mycursor.fetchone()
+    if row is None:
+        return defvalue
+    else:
+        return row[0]
+
+
 def delinventory(pid, itemid):
     with open('db.json', 'r') as openfile:
         json_object = json.load(openfile)
@@ -88,23 +127,35 @@ def loadplayer(player):
             return True
         return False
 
-def checkname(name):
-    with open('db.json', 'r') as openfile:
-        json_object = json.load(openfile)
 
-    mydb = mysql.connector.connect(
-        host=json_object['host'],
-        user=json_object['username'],
-        password=json_object['password'],
-        database=json_object['database']
-    )
-    mycursor = mydb.cursor()
-    mycursor.execute("SELECT name FROM players WHERE name = %s", (name,))
-    row = mycursor.fetchone()
-    if row is None:
-        return True
-    else:
+def checkname(name):
+    if name.lower() == "new":
         return False
+    elif ',' in name:
+        return False
+    elif '"' in name:
+        return False
+    elif '\'' in name:
+        return False
+    elif len(name) < 2:
+        return False
+    else:
+        with open('db.json', 'r') as openfile:
+            json_object = json.load(openfile)
+
+        mydb = mysql.connector.connect(
+            host=json_object['host'],
+            user=json_object['username'],
+            password=json_object['password'],
+            database=json_object['database']
+        )
+        mycursor = mydb.cursor()
+        mycursor.execute("SELECT name FROM players WHERE name = %s", (name,))
+        row = mycursor.fetchone()
+        if row is None:
+            return True
+        else:
+            return False
 
 
 def updateplayerroom(player):
@@ -158,6 +209,12 @@ def loaditem(itemid):
     return item
 
 
+def str2bool(v):
+    if v == "True":
+        return True
+    return False
+
+
 def loaditems(room):
     with open('db.json', 'r') as openfile:
         json_object = json.load(openfile)
@@ -207,11 +264,11 @@ def loadrooms():
 
     for row in myresult:
         room = {'id': row[0], 'name': row[1], 'description': row[2], 'exits': [], 'items': []}
-        mycursor.execute("SELECT id, name, toroom FROM exitdef WHERE fromroom = %s", (row[0],))
+        mycursor.execute("SELECT id, name, toroom, itemkey, failkey FROM exitdef WHERE fromroom = %s", (row[0],))
         exresult = mycursor.fetchall()
 
         for exrow in exresult:
-            room['exits'].append({'name': exrow[1], 'toroom': exrow[2]})
+            room['exits'].append({'name': exrow[1], 'toroom': exrow[2], 'itemkey': exrow[3], 'failkey': exrow[4]})
 
         rooms.append(room)
 
@@ -252,11 +309,13 @@ while True:
             "dbid": None,
             "password": None,
             "newplayer": False,
+            "health": 100,
+            "color": True,
             "inventory": []
         }
 
         # send the new player a prompt for their name
-        mud.send_message(id, "What is your name? (or 'new' for a new player)")
+        mud.send_message(id, "What is your name? (or 'new' for a new player)", auth=False)
 
     # go through any recently disconnected players
     for id in mud.get_disconnected_players():
@@ -268,10 +327,11 @@ while True:
 
         # go through all the players in the game
         for pid, pl in players.items():
-            # send each player a message to tell them about the diconnected
+            # send each player a message to tell them about the disconnected
             # player
-            mud.send_message(pid, "{} quit the game".format(
-                players[id]["name"]))
+            if pid != id and players[id]["password"]:
+                mud.send_message(pid, "%bold%yellow{} quit the game".format(
+                    players[id]["name"]))
 
         # remove the player's entry in the player dictionary
         del (players[id])
@@ -290,26 +350,31 @@ while True:
 
             if command.lower() == "new":
                 players[id]["newplayer"] = True
-                mud.send_message(id, "What would you like your name to be?")
+                mud.send_message(id, "What would you like your name to be?", auth=False)
             else:
                 if players[id]["newplayer"]:
                     if checkname(command):
                         players[id]["name"] = command
-                        mud.send_message(id, "Choose a password?")
+                        mud.send_message(id, "Choose a password?", auth=False)
                     else:
-                        mud.send_message(id, "Sorry, that name is in use, try again.")
+                        mud.send_message(id, "Sorry, that name is in use or inappropriate, try again.", 'red',
+                                         auth=False)
                 else:
                     players[id]["name"] = command
-                    mud.send_message(id, "What is your password? ")
+                    mud.send_message(id, "What is your password? ", auth=False)
 
         elif players[id]["password"] is None:
+            if len(command) < 8 and players[id]["newplayer"]:
+                mud.send_message(id, "Password too short!", 'red', auth=False)
+                mud.send_message(id, "Choose a password?", auth=False)
+                continue
+
             players[id]["password"] = command
 
             shouldcontinue = False
             for pid, pl in players.items():
                 if pid != id:
                     if players[pid]['name'] == players[id]['name']:
-                        del (players[id])
                         mud.disconnect(id)
                         shouldcontinue = True
                         break
@@ -321,29 +386,38 @@ while True:
                     del (players[id])
                     mud.disconnect(id)
                     continue
+                else:
+                    players[id]["health"] = int(getattrib(players[id]["dbid"], "health", "100"))
+                    players[id]["color"] = str2bool(getattrib(players[id]["dbid"], "color", "True"))
+                    if not players[id]["color"]:
+                        mud.togglecolor(id)
+                    mud.authenticate(id)
             else:
                 players[id]["room"] = 1
+                players[id]["health"] = 100
                 instplayer(players[id])
+                mud.authenticate(id)
 
             # go through all the players in the game
             for pid, pl in players.items():
                 # send each player a message to tell them about the new player
-                mud.send_message(pid, "{} entered the game".format(
+                mud.send_message(pid, "%bold%yellow{} entered the game".format(
                     players[id]["name"]))
 
             # send the new player a welcome message
             mud.send_message(id, "Welcome to the game, {}. ".format(
                 players[id]["name"])
-                             + "Type 'help' for a list of commands. Have fun!")
+                             + "Type 'help' for a list of commands. Have fun!\r\n", 'magenta')
 
             # send the new player the description of their current room
+            mud.send_message(id, "\r\n%bold%cyan" + findroom(players[id]["room"])["name"] + "\r\n")
             mud.send_message(id, findroom(players[id]["room"])["description"])
+            mud.send_char_status(id, players[id]["health"])
 
         # each of the possible commands is handled below. Try adding new
         # commands to the game!
 
         elif command == "quit":
-            del (players[id])
             mud.disconnect(id)
             continue
 
@@ -375,8 +449,19 @@ while True:
                 # if they're in the same room as the player
                 if players[pid]["room"] == players[id]["room"]:
                     # send them a message telling them what the player said
-                    mud.send_message(pid, "{} says: {}".format(
+                    mud.send_message(pid, "%bold%blue{} says: {}".format(
                         players[id]["name"], params))
+
+        elif command == 'color':
+            ex = params.lower()
+            if ex == "off":
+                if players[id]['color']:
+                    putattrib(players[id]["dbid"], "color", "False")
+                    mud.togglecolor(id)
+            else:
+                if not players[id]['color']:
+                    putattrib(players[id]["dbid"], "color", "True")
+                    mud.togglecolor(id)
 
         elif command == "drop":
             ex = params.lower()
@@ -415,8 +500,8 @@ while True:
                             addinventory(players[id]['dbid'], it['takeitem'])
                         else:
                             mud.send_message(id, it['failtake'])
-                found = True
-                break
+                    found = True
+                    break
 
             if not found:
                 mud.send_message(id, "take what?!")
@@ -452,7 +537,8 @@ while True:
             rm = findroom(players[id]["room"])
 
             # send the player back the description of their current room
-            mud.send_message(id, rm["description"])
+            mud.send_message(id, "\r\n\r\n%bold%cyan" + rm["name"] + "\r\n")
+            mud.send_message(id, rm["description"] + "\r\n")
 
             playershere = []
             # go through every player in the game
@@ -465,7 +551,7 @@ while True:
                         playershere.append(players[pid]["name"])
 
             # send player a message containing the list of players in the room
-            mud.send_message(id, "Players here: {}".format(
+            mud.send_message(id, "%cyanPlayers: %reset{}".format(
                 ", ".join(playershere)))
 
             # send player a message containing the list of exits from this room
@@ -473,14 +559,14 @@ while True:
             for ex in rm['exits']:
                 exitshere.append(ex['name'])
 
-            mud.send_message(id, "Exits are: {}".format(
+            mud.send_message(id, "%cyanExits: %reset{}".format(
                 ", ".join(exitshere)))
 
             itemshere = []
             for it in rm['items']:
                 itemshere.append(it['name'])
 
-            mud.send_message(id, "Objects are: {}".format(", ".join(itemshere)))
+            mud.send_message(id, "%cyanObjects: %reset{}".format(", ".join(itemshere)))
 
         # 'go' command
         elif command == "go":
@@ -494,38 +580,49 @@ while True:
             # if the specified exit is found in the room's exits list
             for rex in rm["exits"]:
                 if rex["name"] == ex:
-                    # go through all the players in the game
-                    for pid, pl in players.items():
-                        # if player is in the same room and isn't the player
-                        # sending the command
-                        if players[pid]["room"] == players[id]["room"] \
-                                and pid != id:
-                            # send them a message telling them that the player
-                            # left the room
-                            mud.send_message(pid, "{} left via exit '{}'".format(
-                                players[id]["name"], rex["name"]))
-
-                    # update the player's current room to the one the exit leads to
-                    players[id]["room"] = rex['toroom']
-                    rm = findroom(players[id]["room"])
-
-                    # go through all the players in the game
-                    for pid, pl in players.items():
-                        # if player is in the same (new) room and isn't the player
-                        # sending the command
-                        if players[pid]["room"] == players[id]["room"] \
-                                and pid != id:
-                            # send them a message telling them that the player
-                            # entered the room
-                            mud.send_message(pid,
-                                             "{} arrived via exit '{}'".format(
-                                                 players[id]["name"], rex["name"]))
-
-                    # send the player a message telling them where they are now
-                    mud.send_message(id, "You arrive at '{}'".format(
-                        findroom(players[id]["room"])["name"]))
                     found = True
-                    updateplayerroom(players[id])
+                    key = True
+                    if rex['itemkey'] != 0:
+                        key = False
+                        for ite in players[id]['inventory']:
+                            if ite['id'] == rex['itemkey']:
+                                key = True
+                                break
+                    if key:
+                        # go through all the players in the game
+                        for pid, pl in players.items():
+                            # if player is in the same room and isn't the player
+                            # sending the command
+                            if players[pid]["room"] == players[id]["room"] \
+                                    and pid != id:
+                                # send them a message telling them that the player
+                                # left the room
+                                mud.send_message(pid, "%bold%yellow{} left via exit '{}'".format(
+                                    players[id]["name"], rex["name"]))
+
+                        # update the player's current room to the one the exit leads to
+                        players[id]["room"] = rex['toroom']
+                        rm = findroom(players[id]["room"])
+
+                        # go through all the players in the game
+                        for pid, pl in players.items():
+                            # if player is in the same (new) room and isn't the player
+                            # sending the command
+                            if players[pid]["room"] == players[id]["room"] \
+                                    and pid != id:
+                                # send them a message telling them that the player
+                                # entered the room
+                                mud.send_message(pid,
+                                                 "%bold%yellow{} arrived via exit '{}'".format(
+                                                     players[id]["name"], rex["name"]))
+
+                        # send the player a message telling them where they are now
+                        mud.send_message(id, "You arrive at '{}'".format(
+                            findroom(players[id]["room"])["name"]))
+
+                        updateplayerroom(players[id])
+                    else:
+                        mud.send_message(id, "{}".format(rex['failkey']))
                 # the specified exit wasn't found in the current room
             if not found:
                 # send back an 'unknown exit' message

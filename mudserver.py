@@ -13,6 +13,36 @@ import time
 import sys
 
 
+codes = {'resetall': 0, 'bold': 1, 'underline': 4,
+         'blink': 5, 'reverse': 7, 'boldoff': 22,
+         'blinkoff': 25, 'underlineoff': 24, 'reverseoff': 27,
+         'reset': 0, 'black': 30, 'red': 31, 'green': 32,
+         'yellow': 33, 'blue': 34, 'magenta': 35, 'cyan': 36,
+         'white': 37}
+
+
+def get_color(name):
+    if name not in codes:
+        return ''
+    return '\x1b[{}m'.format(codes.get(name, 0))
+
+
+def get_color_list():
+    res = {}
+    for c in codes:
+        res['%' + c] = c
+    return res
+
+
+def multiple_replace(text, replace_words, color_enabled=True):
+    for word, replacement in replace_words.items():
+        if color_enabled:
+            text = text.replace(word, get_color(replacement))
+        else:
+            text = text.replace(word, '')
+    return text
+
+
 class MudServer(object):
     """A basic server for text-based Multi-User Dungeon (MUD) games.
 
@@ -38,12 +68,16 @@ class MudServer(object):
         buffer = ""
         # the last time we checked if the client was still connected
         lastcheck = 0
+        color_enabled = True
+        authenticated = False
 
         def __init__(self, socket, address, buffer, lastcheck):
             self.socket = socket
             self.address = address
             self.buffer = buffer
             self.lastcheck = lastcheck
+            self.MXP_ENABLED = False
+            self.GMCP_ENABLED = False
 
     # Used to store different types of occurences
     _EVENT_NEW_PLAYER = 1
@@ -66,6 +100,9 @@ class MudServer(object):
     _TN_DONT = 254
     _TN_SUBNEGOTIATION_START = 250
     _TN_SUBNEGOTIATION_END = 240
+
+    _MXP = 91
+    _GMCP = 201
 
     # socket used to listen for new clients
     _listen_socket = None
@@ -109,6 +146,9 @@ class MudServer(object):
 
         # start listening for connections on the socket
         self._listen_socket.listen(1)
+
+    def togglecolor(self, cid):
+        self._clients[cid].color_enabled = not self._clients[cid].color_enabled
 
     def update(self):
         """Checks for new players, disconnected players, and new
@@ -175,18 +215,35 @@ class MudServer(object):
         # return the info list
         return retval
 
-    def send_message(self, to, message):
+    def send_message(self, to, message, color=None, auth=True):
         """Sends the text in the 'message' parameter to the player with
         the id number given in the 'to' parameter. The text will be
         printed out in the player's terminal.
         """
         # we make sure to put a newline on the end so the client receives the
         # message on its own line
-        self._attempt_send(to, message + "\n\r")
+
+        if auth and not self._clients[to].authenticated:
+            return
+
+        if color is None:
+            msg = multiple_replace(message, get_color_list(), self._clients[to].color_enabled)
+            if self._clients[to].color_enabled:
+                self._attempt_send(to, msg + get_color('reset') + "\n\r")
+            else:
+                self._attempt_send(to, msg + "\n\r")
+        else:
+            if self._clients[to].color_enabled:
+                self._attempt_send(to, get_color(color) + message + get_color('reset') + "\n\r")
+            else:
+                self._attempt_send(to, message + "\n\r")
 
     def disconnect(self, me):
         self._clients[me].socket.close()
-        del (self._clients[me])
+        self._handle_disconnect(me)
+
+    def authenticate(self, me):
+        self._clients[me].authenticated = True
 
     def shutdown(self):
         """Closes down the server, disconnecting all clients and
@@ -200,10 +257,30 @@ class MudServer(object):
         # stop listening for new clients
         self._listen_socket.close()
 
+    def send_char_status(self, clid, hp):
+        if self._clients[clid].GMCP_ENABLED:
+            vitals = "character.vitals: {hp: '%s', max_hp: 100}" % hp
+            self.gmcp_message(clid, vitals)
+
+    def mxp_secure(self, clid, message, mxp_code="1"):
+        bytes_to_send = bytearray("\x1b[{}z{}\x1b[3z\r\n".format(mxp_code, message), 'utf-8')
+        client_socket = self._clients[clid].socket
+        client_socket.sendall(bytes_to_send)
+
+    def gmcp_message(self, clid, message):
+        array = [self._TN_INTERPRET_AS_COMMAND, self._TN_SUBNEGOTIATION_START, self._GMCP]
+        for char in message:
+            array.append(ord(char))
+        array.append(self._TN_INTERPRET_AS_COMMAND)
+        array.append(self._TN_SUBNEGOTIATION_END)
+        byte_data = bytearray(array)
+
+        print("SENDING GMCP")
+        print(byte_data)
+        client_socket = self._clients[clid].socket
+        client_socket.sendall(byte_data)
+
     def _attempt_send(self, clid, data):
-        # python 2/3 compatability fix - convert non-unicode string to unicode
-        if sys.version < '3' and type(data) != unicode:
-            data = unicode(data, "latin1")
         try:
             # look up the client in the client map and use 'sendall' to send
             # the message string on the socket. 'sendall' ensures that all of
@@ -245,6 +322,12 @@ class MudServer(object):
         # client. Use 'nextid' as the new client's id number
         self._clients[self._nextid] = MudServer._Client(joined_socket, addr[0],
                                                         "", time.time())
+        GMCP_REQUEST = bytearray([self._TN_INTERPRET_AS_COMMAND, self._TN_WILL, self._GMCP])
+        joined_socket.sendall(GMCP_REQUEST)
+
+        MXP_REQUEST = bytearray([self._TN_INTERPRET_AS_COMMAND, self._TN_WILL, self._MXP])
+        joined_socket.sendall(MXP_REQUEST)
+
 
         # add a new player occurence to the new events list with the player's
         # id number
@@ -327,7 +410,7 @@ class MudServer(object):
         self._new_events.append((self._EVENT_PLAYER_LEFT, clid))
 
     def _process_sent_data(self, client, data):
-
+        option_support = 0
         # the Telnet protocol allows special command codes to be inserted into
         # messages. For our very simple server we don't need to response to
         # any of these codes, but we must at least detect and skip over them
@@ -387,10 +470,35 @@ class MudServer(object):
                 # code so we must remain in the 'command' state
                 elif ord(c) in (self._TN_WILL, self._TN_WONT, self._TN_DO,
                                 self._TN_DONT):
+                    option_support = ord(c)
                     state = self._READ_STATE_COMMAND
 
                 # for all other command codes, there is no accompanying data so
                 # we can return to 'normal' state.
+                elif ord(c) == self._MXP:
+                    if option_support == self._TN_DO:
+                        print("MXP Enabled")
+                        client.MXP_ENABLED = True
+                        # Enable for mushclient "on command"
+                        byte_data = bytearray([self._TN_INTERPRET_AS_COMMAND, self._TN_SUBNEGOTIATION_START, self._MXP,
+                                               self._TN_INTERPRET_AS_COMMAND, self._TN_SUBNEGOTIATION_END])
+                        client.socket.sendall(byte_data)
+                    else:
+                        print("MXP Disabled")
+                        client.MXP_ENABLED = False
+                    state = self._READ_STATE_NORMAL
+                elif ord(c) == self._GMCP:
+                    if option_support == self._TN_DO:
+                        print("GMCP Enabled")
+                        client.GMCP_ENABLED = True
+                        # Enable for mushclient "on command"
+                        byte_data = bytearray([self._TN_INTERPRET_AS_COMMAND, self._TN_SUBNEGOTIATION_START, self._GMCP,
+                                               self._TN_INTERPRET_AS_COMMAND, self._TN_SUBNEGOTIATION_END])
+                        client.socket.sendall(byte_data)
+                    else:
+                        print("GMCP Disabled")
+                        client.GMCP_ENABLED = False
+                    state = self._READ_STATE_NORMAL
                 else:
                     state = self._READ_STATE_NORMAL
 
