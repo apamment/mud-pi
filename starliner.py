@@ -197,12 +197,12 @@ def loaditem(itemid):
         database=json_object['database']
     )
     mycursor = mydb.cursor()
-    mycursor.execute("SELECT id, name, description, invulnerable, isuniq, isarmor, isweapon, power FROM itemdef WHERE "
-                     "id = %s", (itemid,))
+    mycursor.execute("SELECT id, name, description, invulnerable, isuniq, isarmor, isweapon, power, basevalue, bound "
+                     "FROM itemdef WHERE id = %s", (itemid,))
     row = mycursor.fetchone()
 
     item = {'id': row[0], 'name': row[1], 'description': row[2], 'invulnerable': row[3], 'isuniq': row[4],
-            'isarmor': row[5], 'isweapon': row[6], 'power': row[7]}
+            'isarmor': row[5], 'isweapon': row[6], 'power': row[7], 'basevalue': row[8], 'bound': row[9]}
 
     return item
 
@@ -211,6 +211,26 @@ def str2bool(v):
     if v == "True":
         return True
     return False
+
+def loadnpcs(room):
+    with open('db.json', 'r') as openfile:
+        json_object = json.load(openfile)
+
+    mydb = mysql.connector.connect(
+        host=json_object['host'],
+        user=json_object['username'],
+        password=json_object['password'],
+        database=json_object['database']
+    )
+    mycursor = mydb.cursor()
+    mycursor.execute("SELECT npcid FROM roomnpc WHERE roomid = %s", (room['id'],))
+    myresult = mycursor.fetchall()
+    for row in myresult:
+        mycursor.execute("SELECT name, description, code, arg FROM npcdef WHERE id = %s",
+                         (row[0],))
+        npcrow = mycursor.fetchone()
+        room['npcs'].append({'id': row[0], 'name': npcrow[0], 'description': npcrow[1], 'code': npcrow[2],
+                             'arg': npcrow[3]})
 
 
 def loaditems(room):
@@ -261,7 +281,7 @@ def loadrooms():
     rooms = []
 
     for row in myresult:
-        room = {'id': row[0], 'name': row[1], 'description': row[2], 'exits': [], 'items': []}
+        room = {'id': row[0], 'name': row[1], 'description': row[2], 'exits': [], 'items': [], 'npcs': []}
         mycursor.execute("SELECT id, name, toroom, itemkey, failkey FROM exitdef WHERE fromroom = %s", (row[0],))
         exresult = mycursor.fetchall()
 
@@ -306,6 +326,11 @@ def cmd_look(id, rm):
 
     mud.send_message(id, "%cyanObjects: %reset{}".format(", ".join(itemshere)))
 
+    npcshere = []
+    for it in rm['npcs']:
+        npcshere.append(it['name'])
+
+    mud.send_message(id, "%cyanNPCs: %reset{}".format(", ".join(npcshere)))
 
 # stores the players in the game
 players = {}
@@ -316,6 +341,7 @@ mud = MudServer()
 rooms = loadrooms()
 for room in rooms:
     loaditems(room)
+    loadnpcs(room)
 
 # main game loop. We loop forever (i.e. until the program is terminated)
 while True:
@@ -346,6 +372,7 @@ while True:
             "color": True,
             "armor": None,
             "weapon": None,
+            "target": None,
             "inventory": []
         }
 
@@ -464,11 +491,68 @@ while True:
             rm = findroom(players[id]["room"])
 
             cmd_look(id, rm)
-            mud.send_message(id, "\n\r{} [%bold%yellow{} gold%reset] [%bold%red{} HP%reset] :> ".format(players[id]['name'], players[id]['gold'], players[id]['health']), lineend="")
+            mud.send_message(id, "\n\r{} [%bold%yellow{} gold%reset] [%bold%red{} HP%reset] :> ".format(
+                players[id]['name'], players[id]['gold'], players[id]['health']), lineend="")
 
         # each of the possible commands is handled below. Try adding new
         # commands to the game!
+        elif players[id]['target'] is not None:
+            # NPC CODE 1 = SCRAPBOT
+            if players[id]['target']['code'] == 1:
+                if command == "help":
+                    mud.send_message(id, "I am a scrapbot, I turn unwanted items into gold!", lineend="\n\r\n\r")
+                    mud.send_message(id, "I answer to the following commands:")
+                    mud.send_message(id, "  appraise <item> - tell you how much <item> is worth.")
+                    mud.send_message(id, "                    eg: 'appraise sword'")
+                    mud.send_message(id, "  scrap <item>    - make the exchange. THIS CAN NOT BE UNDONE! ")
+                    mud.send_message(id, "                    eg: 'scrap sword'")
+                    mud.send_message(id, "  bye             - leave me in peace.")
 
+                elif command == "appraise":
+                    ex = params.lower()
+                    found = False
+                    for it in players[id]['inventory']:
+                        if it['name'] == ex:
+                            if it['basevalue'] > 0:
+                                val = int(it['basevalue'] * 0.10)
+                                mud.send_message(id, "That {} looks like it's worth {}g".format(it['name'], val))
+                            else:
+                                mud.send_message(id, "That item has no value!")
+
+                            found = True
+                            break
+                    if not found:
+                        mud.send_message(id, "appraise what?")
+
+                elif command == "scrap":
+                    ex = params.lower()
+                    found = False
+                    for it in players[id]['inventory']:
+                        if it['name'] == ex:
+                            if it['basevalue'] > 0:
+                                val = int(it['basevalue'] * 0.10)
+                                players[id]['gold'] += val
+                                delinventory(players[id]['dbid'], it['id'])
+                                putattrib(players[id]['dbid'], "gold", str(players[id]['gold']))
+                                mud.send_message(id, "Here's {}g for your {}".format(val, it['name']))
+                                players[id]['inventory'].remove(it)
+                            else:
+                                mud.send_message(id, "That item has no value!")
+
+                            found = True
+                            break
+                    if not found:
+                        mud.send_message(id, "scrap what?")
+
+            if command == "bye":
+                players[id]['target'] = None
+                mud.send_message(id, "\n\r{} [%bold%yellow{} gold%reset] [%bold%red{} HP%reset] :> ".format(
+                    players[id]['name'], players[id]['gold'], players[id]['health']), lineend="")
+                continue
+
+            mud.send_message(id, "\n\r{} -> {} [%bold%yellow{} gold%reset] [%bold%red{} HP%reset] :> ".format(
+                players[id]['name'], players[id]['target']['name'], players[id]['gold'], players[id]['health']),
+                lineend="")
         else:
             if command == "quit":
                 mud.disconnect(id)
@@ -648,6 +732,13 @@ while True:
                             break
 
                 if not found:
+                    for it in rm['npcs']:
+                        if it['name'] == ex:
+                            mud.send_message(id, it['description'])
+                            found = True
+                            break
+
+                if not found:
                     mud.send_message(id, "examine what?!")
 
             elif command == "look":
@@ -715,10 +806,27 @@ while True:
                 if not found:
                     # send back an 'unknown exit' message
                     mud.send_message(id, "Unknown exit '{}'".format(ex))
+            elif command == 'target':
+                ex = params.lower()
+                rm = findroom(players[id]["room"])
+                found = False
 
+                for it in rm['npcs']:
+                    if it['name'] == ex:
+                        players[id]['target'] = it
+                        mud.send_message(id, "Now targeting %bold{}%reset enter 'bye' to stop targeting.".format(it['name']))
+                        found = True
+                        break
+                if not found:
+                    mud.send_message(id, "I see no such NPC")
             # some other, unrecognised command
             else:
                 # send back an 'unknown command' message
                 mud.send_message(id, "Unknown command '{}'".format(command))
-            mud.send_message(id, "\n\r{} [%bold%yellow{} gold%reset] [%bold%red{} HP%reset] :> ".format(
-                players[id]['name'], players[id]['gold'], players[id]['health']), lineend="")
+            if players[id]['target'] is not None:
+                mud.send_message(id, "\n\r{} -> {} [%bold%yellow{} gold%reset] [%bold%red{} HP%reset] :> ".format(
+                    players[id]['name'], players[id]['target']['name'], players[id]['gold'], players[id]['health']),
+                                 lineend="")
+            else:
+                mud.send_message(id, "\n\r{} [%bold%yellow{} gold%reset] [%bold%red{} HP%reset] :> ".format(
+                    players[id]['name'], players[id]['gold'], players[id]['health']), lineend="")
