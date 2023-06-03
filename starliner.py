@@ -515,7 +515,7 @@ while True:
                         if it['name'] == ex:
                             if it['basevalue'] > 0:
                                 val = int(it['basevalue'] * 0.10)
-                                mud.send_message(id, "That {} looks like it's worth {}g".format(it['name'], val))
+                                mud.send_message(id, "That {} looks like it's worth {} gold".format(it['name'], val))
                             else:
                                 mud.send_message(id, "That item has no value!")
 
@@ -534,7 +534,7 @@ while True:
                                 players[id]['gold'] += val
                                 delinventory(players[id]['dbid'], it['id'])
                                 putattrib(players[id]['dbid'], "gold", str(players[id]['gold']))
-                                mud.send_message(id, "Here's {}g for your {}".format(val, it['name']))
+                                mud.send_message(id, "Here's {} gold for your {}".format(val, it['name']))
                                 players[id]['inventory'].remove(it)
                             else:
                                 mud.send_message(id, "That item has no value!")
@@ -814,7 +814,8 @@ while True:
                 for it in rm['npcs']:
                     if it['name'] == ex:
                         players[id]['target'] = it
-                        mud.send_message(id, "Now targeting %bold{}%reset enter 'bye' to stop targeting.".format(it['name']))
+                        mud.send_message(id, "Now targeting %bold{}%reset enter 'bye' to stop targeting.".format(
+                            it['name']))
                         found = True
                         break
                 if not found:
