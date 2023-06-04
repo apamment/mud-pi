@@ -201,8 +201,9 @@ def loaditem(itemid):
                      "FROM itemdef WHERE id = %s", (itemid,))
     row = mycursor.fetchone()
 
-    item = {'id': row[0], 'name': row[1], 'description': row[2], 'invulnerable': row[3], 'isuniq': row[4],
-            'isarmor': row[5], 'isweapon': row[6], 'power': row[7], 'basevalue': row[8], 'bound': row[9]}
+    item = {'id': row[0], 'name': row[1], 'description': row[2].replace('\n', '\n\r'), 'invulnerable': row[3],
+            'isuniq': row[4], 'isarmor': row[5], 'isweapon': row[6], 'power': row[7], 'basevalue': row[8],
+            'bound': row[9]}
 
     return item
 
@@ -229,8 +230,8 @@ def loadnpcs(room):
         mycursor.execute("SELECT name, description, code, arg FROM npcdef WHERE id = %s",
                          (row[0],))
         npcrow = mycursor.fetchone()
-        room['npcs'].append({'id': row[0], 'name': npcrow[0], 'description': npcrow[1], 'code': npcrow[2],
-                             'arg': npcrow[3]})
+        room['npcs'].append({'id': row[0], 'name': npcrow[0], 'description': npcrow[1].replace('\n', '\n\r'),
+                             'code': npcrow[2], 'arg': npcrow[3]})
 
 
 def loaditems(room):
@@ -251,7 +252,7 @@ def loaditems(room):
                          (row[0],))
         objrow = mycursor.fetchone()
         room['items'].append(
-            {'id': row[0], 'name': objrow[0], 'description': objrow[1], 'movable': objrow[2], 'failtake': objrow[3],
+            {'id': row[0], 'name': objrow[0], 'description': objrow[1].replace('\n', '\n\r'), 'movable': objrow[2], 'failtake': objrow[3],
              'takesuccess': objrow[4], 'takeitem': objrow[5]})
 
 
@@ -281,7 +282,8 @@ def loadrooms():
     rooms = []
 
     for row in myresult:
-        room = {'id': row[0], 'name': row[1], 'description': row[2], 'exits': [], 'items': [], 'npcs': []}
+        room = {'id': row[0], 'name': row[1], 'description': row[2].replace('\n', '\n\r'), 'exits': [], 'items': [],
+                'npcs': []}
         mycursor.execute("SELECT id, name, toroom, itemkey, failkey FROM exitdef WHERE fromroom = %s", (row[0],))
         exresult = mycursor.fetchall()
 
