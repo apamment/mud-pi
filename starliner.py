@@ -603,10 +603,12 @@ while True:
                     if players[id]['color']:
                         putattrib(players[id]["dbid"], "color", "False")
                         mud.togglecolor(id)
+                        players[id]['color'] = False
                 else:
                     if not players[id]['color']:
                         putattrib(players[id]["dbid"], "color", "True")
                         mud.togglecolor(id)
+                        players[id]['color'] = True
 
             elif command == "drop":
                 ex = params.lower()
